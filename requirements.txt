@@ -6,3 +6,4 @@ seaborn
 plotly
 openpyxl
 scikit-learn
+ipython
