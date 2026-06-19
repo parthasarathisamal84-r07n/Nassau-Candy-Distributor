@@ -1,811 +1,404 @@
-# =============================================================================
-# Nassau Candy Distributor
-# Product Line Profitability & Margin Performance Analysis
-# Google Colab Notebook
-# =============================================================================
-# HOW TO USE:
-#   1. Open Google Colab: https://colab.research.google.com
-#   2. File → Upload notebook  OR  paste each cell into a new notebook
-#   3. Run Cell 1 first (installs & uploads your CSV)
-#   4. Run remaining cells in order — all charts display inline
-# =============================================================================
+"""
+Nassau Candy Distributor
+Product Line Profitability & Margin Performance Dashboard
+============================================================
+A Streamlit web app — deployable on Streamlit Community Cloud.
 
+HOW TO DEPLOY:
+1. Push this file + Nassau_Candy_Distributor.csv + requirements.txt
+   to a GitHub repo (same folder).
+2. Go to https://share.streamlit.io  →  "New app"
+3. Point it at this file (app.py) in your repo.
+4. Done — no google.colab, no extra setup needed.
 
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 1 — Setup: Install libraries & upload CSV
-# ╔══════════════════════════════════════════════════════════════════════════════
+HOW TO RUN LOCALLY:
+    pip install -r requirements.txt
+    streamlit run app.py
+"""
 
-# pip install is only needed for libraries not pre-installed in Colab
-# pandas, numpy, matplotlib, seaborn are already available — no install needed
-
+import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-import matplotlib.ticker as mticker
-import seaborn as sns
-import warnings
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import os
-from IPython.display import display, HTML
 
-warnings.filterwarnings("ignore")
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE CONFIG
+# ══════════════════════════════════════════════════════════════════════════════
+st.set_page_config(
+    page_title="Nassau Candy — Profitability Dashboard",
+    page_icon="🍬",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-# ── Upload your CSV file ──────────────────────────────────────────────────────
-from google.colab import files
+PALETTE = {"Chocolate": "#6B3A2A", "Sugar": "#E87C6C", "Other": "#4a8a68"}
+ACCENT = "#2C5F8A"
 
-print("📂  Please upload  Nassau_Candy_Distributor.csv  when prompted ...")
-uploaded = files.upload()
-
-# Grab the filename from whatever was uploaded
-CSV_FILE = list(uploaded.keys())[0]
-print(f"\n✅  File received: {CSV_FILE}")
-
-# ── Output folder (inside Colab's temporary filesystem) ──────────────────────
-OUT_DIR = "/content/nassau_outputs"
-os.makedirs(OUT_DIR, exist_ok=True)
-print(f"📁  Charts will be saved to: {OUT_DIR}")
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 2 — Theme & Helper Functions
-# ╔══════════════════════════════════════════════════════════════════════════════
-
-# Colour palette — consistent across all charts
-PALETTE = {"Chocolate": "#6B3A2A", "Sugar": "#E87C6C", "Other": "#A8C8A0"}
-BG      = "#FAFAF8"
-ACCENT  = "#2C5F8A"
-
-# Global matplotlib style
-plt.rcParams.update({
-    "figure.facecolor":  BG,
-    "axes.facecolor":    BG,
-    "axes.spines.top":   False,
-    "axes.spines.right": False,
-    "axes.grid":         False,
-    "font.family":       "DejaVu Sans",
-    "axes.titlesize":    13,
-    "axes.titleweight":  "bold",
-    "axes.labelsize":    11,
-    "xtick.labelsize":   9,
-    "ytick.labelsize":   9,
-})
-
-def save_and_show(name):
-    """Save chart to output folder AND display inline in Colab."""
-    path = os.path.join(OUT_DIR, name)
-    plt.savefig(path, dpi=150, bbox_inches="tight", facecolor=BG)
-    plt.show()          # ← renders inline in Colab
-    plt.close("all")
-    print(f"  💾  Saved → {path}\n")
-
-def divider(title):
-    """Print a styled section header."""
-    print("\n" + "═" * 65)
-    print(f"  {title}")
-    print("═" * 65)
-
-print("✅  Theme and helpers ready.")
+st.markdown("""
+<style>
+.block-container {padding-top: 1.5rem;}
+[data-testid="stMetricValue"] {font-size: 26px;}
+h1, h2, h3 {color: #3B2010;}
+</style>
+""", unsafe_allow_html=True)
 
 
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 3 — Load & Clean Data
-# ╔══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+# DATA LOADING  (cached so it only runs once per session)
+# ══════════════════════════════════════════════════════════════════════════════
+@st.cache_data
+def load_data():
+    # Look for the CSV next to this script — works both locally and on Streamlit Cloud
+    here = os.path.dirname(os.path.abspath(__file__))
+    csv_path = os.path.join(here, "Nassau_Candy_Distributor.csv")
 
-divider("STEP 1 — Loading & Cleaning Data")
+    df = pd.read_csv(csv_path)
+    df.columns = df.columns.str.strip()
 
-df = pd.read_csv(CSV_FILE)
-df.columns = df.columns.str.strip()
+    # Parse dates (file uses DD-MM-YYYY)
+    df["Order Date"] = pd.to_datetime(df["Order Date"], dayfirst=True, errors="coerce")
+    df["Ship Date"]  = pd.to_datetime(df["Ship Date"],  dayfirst=True, errors="coerce")
 
-# Parse dates
-df["Order Date"] = pd.to_datetime(df["Order Date"], dayfirst=True, errors="coerce")
-df["Ship Date"]  = pd.to_datetime(df["Ship Date"],  dayfirst=True, errors="coerce")
+    # Clean invalid rows
+    df = df.dropna(subset=["Sales", "Cost", "Gross Profit", "Units", "Order Date"])
+    df = df[(df["Sales"] > 0) & (df["Units"] > 0)]
 
-# Drop invalid rows
-before = len(df)
-df = df.dropna(subset=["Sales", "Cost", "Gross Profit", "Units"])
-df = df[(df["Sales"] > 0) & (df["Units"] > 0)]
-dropped = before - len(df)
+    # Derived KPIs
+    df["Gross Margin %"]  = (df["Gross Profit"] / df["Sales"] * 100).round(2)
+    df["Profit per Unit"] = (df["Gross Profit"] / df["Units"]).round(2)
+    df["Cost per Unit"]   = (df["Cost"] / df["Units"]).round(2)
+    df["Month"]           = df["Order Date"].dt.to_period("M").dt.to_timestamp()
 
-# ── Derived KPI columns ───────────────────────────────────────────────────────
-df["Gross Margin %"]  = (df["Gross Profit"] / df["Sales"] * 100).round(2)
-df["Profit per Unit"] = (df["Gross Profit"] / df["Units"]).round(2)
-df["Cost per Unit"]   = (df["Cost"]         / df["Units"]).round(2)
-df["Sales per Unit"]  = (df["Sales"]        / df["Units"]).round(2)
-
-# Time features
-df["Year"]       = df["Order Date"].dt.year
-df["Month"]      = df["Order Date"].dt.to_period("M")
-df["Month_Label"] = df["Order Date"].dt.strftime("%b %Y")
-
-print(f"  Rows loaded        : {len(df):,}  (dropped {dropped} invalid rows)")
-print(f"  Date range         : {df['Order Date'].min().date()}  →  {df['Order Date'].max().date()}")
-print(f"  Divisions          : {sorted(df['Division'].unique())}")
-print(f"  Unique products    : {df['Product Name'].nunique()}")
-print(f"  Unique customers   : {df['Customer ID'].nunique()}")
-print(f"  Regions            : {sorted(df['Region'].unique())}")
-print(f"\n  Columns available  : {list(df.columns)}")
-
-print("\n📋  Sample rows:")
-display(df.head(5))
+    return df
 
 
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 4 — Product & Division Aggregations (KPI tables)
-# ╔══════════════════════════════════════════════════════════════════════════════
+df_raw = load_data()
 
-divider("STEP 2 — Aggregations")
 
-# ── Product-level summary ─────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# SIDEBAR — FILTERS
+# ══════════════════════════════════════════════════════════════════════════════
+st.sidebar.title("🍬 Nassau Candy")
+st.sidebar.caption("Profitability & Margin Dashboard")
+st.sidebar.markdown("---")
+
+st.sidebar.subheader("Filters")
+
+# Date range
+min_date, max_date = df_raw["Order Date"].min().date(), df_raw["Order Date"].max().date()
+date_range = st.sidebar.date_input(
+    "Order date range",
+    value=(min_date, max_date),
+    min_value=min_date,
+    max_value=max_date,
+)
+
+# Division filter
+divisions = sorted(df_raw["Division"].unique())
+selected_divisions = st.sidebar.multiselect(
+    "Division", options=divisions, default=divisions
+)
+
+# Margin threshold slider
+margin_min, margin_max = float(df_raw["Gross Margin %"].min()), float(df_raw["Gross Margin %"].max())
+margin_threshold = st.sidebar.slider(
+    "Minimum Gross Margin %",
+    min_value=0.0, max_value=100.0,
+    value=0.0, step=1.0,
+)
+
+# Product search
+product_search = st.sidebar.text_input("🔍 Search product name", "")
+
+st.sidebar.markdown("---")
+st.sidebar.caption(f"Data range: {min_date} → {max_date}")
+st.sidebar.caption(f"{len(df_raw):,} total order lines")
+
+# ── Apply filters ──────────────────────────────────────────────────────────────
+df = df_raw.copy()
+
+if isinstance(date_range, tuple) and len(date_range) == 2:
+    start, end = date_range
+    df = df[(df["Order Date"].dt.date >= start) & (df["Order Date"].dt.date <= end)]
+
+if selected_divisions:
+    df = df[df["Division"].isin(selected_divisions)]
+
+df = df[df["Gross Margin %"] >= margin_threshold]
+
+if product_search:
+    df = df[df["Product Name"].str.contains(product_search, case=False, na=False)]
+
+if df.empty:
+    st.warning("No data matches the current filters. Try widening your filter selection.")
+    st.stop()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AGGREGATIONS  (recomputed on filtered data)
+# ══════════════════════════════════════════════════════════════════════════════
 prod = (df.groupby(["Division", "Product Name"])
-          .agg(
-              Total_Sales        = ("Sales",        "sum"),
-              Total_Cost         = ("Cost",         "sum"),
-              Total_Gross_Profit = ("Gross Profit", "sum"),
-              Total_Units        = ("Units",        "sum"),
-              Order_Count        = ("Row ID",       "count"),
-          )
+          .agg(Total_Sales=("Sales", "sum"),
+               Total_Cost=("Cost", "sum"),
+               Total_Gross_Profit=("Gross Profit", "sum"),
+               Total_Units=("Units", "sum"),
+               Order_Count=("Row ID", "count"))
           .reset_index())
-
 prod["Gross Margin %"]       = (prod["Total_Gross_Profit"] / prod["Total_Sales"] * 100).round(2)
 prod["Profit per Unit"]      = (prod["Total_Gross_Profit"] / prod["Total_Units"]).round(2)
-prod["Revenue Contribution"] = (prod["Total_Sales"]        / prod["Total_Sales"].sum() * 100).round(2)
+prod["Revenue Contribution"] = (prod["Total_Sales"] / prod["Total_Sales"].sum() * 100).round(2)
 prod["Profit Contribution"]  = (prod["Total_Gross_Profit"] / prod["Total_Gross_Profit"].sum() * 100).round(2)
 prod = prod.sort_values("Total_Gross_Profit", ascending=False).reset_index(drop=True)
 
-# ── Division-level summary ────────────────────────────────────────────────────
 div = (df.groupby("Division")
-         .agg(
-             Total_Sales        = ("Sales",        "sum"),
-             Total_Cost         = ("Cost",         "sum"),
-             Total_Gross_Profit = ("Gross Profit", "sum"),
-             Total_Units        = ("Units",        "sum"),
-             Order_Count        = ("Row ID",       "count"),
-         )
+         .agg(Total_Sales=("Sales", "sum"),
+              Total_Cost=("Cost", "sum"),
+              Total_Gross_Profit=("Gross Profit", "sum"),
+              Total_Units=("Units", "sum"))
          .reset_index())
-
-div["Gross Margin %"]       = (div["Total_Gross_Profit"] / div["Total_Sales"] * 100).round(2)
-div["Profit per Unit"]      = (div["Total_Gross_Profit"] / div["Total_Units"]).round(2)
-div["Revenue Contribution"] = (div["Total_Sales"]        / div["Total_Sales"].sum() * 100).round(2)
-div["Profit Contribution"]  = (div["Total_Gross_Profit"] / div["Total_Gross_Profit"].sum() * 100).round(2)
-
-# Save CSVs
-prod.to_csv(os.path.join(OUT_DIR, "product_summary.csv"), index=False)
-div.to_csv(os.path.join(OUT_DIR,  "division_summary.csv"), index=False)
-
-print("📊  Product-level summary (top 10):")
-display(prod.head(10))
-
-print("\n📊  Division-level summary:")
-display(div)
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 5 — KPI Dashboard Cards
-# ╔══════════════════════════════════════════════════════════════════════════════
-
-divider("CHART 1 — Key Performance Indicators")
-
-total_sales    = df["Sales"].sum()
-total_gp       = df["Gross Profit"].sum()
-total_cost     = df["Cost"].sum()
-overall_margin = total_gp / total_sales * 100
-total_orders   = df["Row ID"].nunique()
-
-kpis = [
-    ("Total Revenue",     f"${total_sales:,.0f}",   ACCENT),
-    ("Total Gross Profit",f"${total_gp:,.0f}",      "#2E8B57"),
-    ("Overall Margin",    f"{overall_margin:.1f}%",  "#B5651D"),
-    ("Total Orders",      f"{total_orders:,}",       "#6B3A2A"),
-]
-
-fig, axes = plt.subplots(1, 4, figsize=(15, 3))
-fig.patch.set_facecolor(BG)
-for ax, (label, val, col) in zip(axes, kpis):
-    ax.set_facecolor(col)
-    ax.text(0.5, 0.62, val,   ha="center", va="center", fontsize=22,
-            fontweight="bold", color="white", transform=ax.transAxes)
-    ax.text(0.5, 0.25, label, ha="center", va="center", fontsize=11,
-            color="white", transform=ax.transAxes)
-    ax.axis("off")
-
-fig.suptitle("Nassau Candy Distributor — Key Performance Indicators",
-             fontsize=14, fontweight="bold", y=1.04, color="#1a1a18")
-plt.tight_layout()
-save_and_show("01_kpi_cards.png")
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 6 — Division: Revenue vs Gross Profit
-# ╔══════════════════════════════════════════════════════════════════════════════
-
-divider("CHART 2 — Division Revenue vs Gross Profit")
-
-fig, ax = plt.subplots(figsize=(9, 5))
-x = np.arange(len(div))
-w = 0.35
-bars1 = ax.bar(x - w/2, div["Total_Sales"],        w,
-               color=[PALETTE[d] for d in div["Division"]], alpha=0.95, label="Revenue")
-bars2 = ax.bar(x + w/2, div["Total_Gross_Profit"], w,
-               color=[PALETTE[d] for d in div["Division"]], alpha=0.50, label="Gross Profit")
-
-ax.set_xticks(x)
-ax.set_xticklabels(div["Division"], fontsize=11)
-ax.set_ylabel("USD ($)")
-ax.set_title("Revenue vs Gross Profit by Division")
-ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"${v:,.0f}"))
-ax.legend(["Revenue", "Gross Profit"], fontsize=9)
-
-for b in bars1:
-    ax.text(b.get_x() + b.get_width()/2, b.get_height() + 200,
-            f"${b.get_height():,.0f}", ha="center", va="bottom", fontsize=8)
-for b in bars2:
-    ax.text(b.get_x() + b.get_width()/2, b.get_height() + 200,
-            f"${b.get_height():,.0f}", ha="center", va="bottom", fontsize=8)
-
-plt.tight_layout()
-save_and_show("02_division_revenue_profit.png")
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 7 — Division Gross Margin %
-# ╔══════════════════════════════════════════════════════════════════════════════
-
-divider("CHART 3 — Gross Margin % by Division")
-
-div_sorted = div.sort_values("Gross Margin %")
-fig, ax = plt.subplots(figsize=(8, 4))
-colors  = [PALETTE[d] for d in div_sorted["Division"]]
-bars    = ax.barh(div_sorted["Division"], div_sorted["Gross Margin %"],
-                  color=colors, edgecolor="white", linewidth=0.5, height=0.5)
-
-for b in bars:
-    ax.text(b.get_width() + 0.5, b.get_y() + b.get_height()/2,
-            f"{b.get_width():.1f}%", va="center", fontsize=10)
-
-avg_m = overall_margin
-ax.axvline(avg_m, color=ACCENT, ls="--", lw=1.5)
-ax.text(avg_m + 0.3, ax.get_ylim()[0] + 0.05,
-        f"Overall avg\n{avg_m:.1f}%", color=ACCENT, fontsize=8, va="bottom")
-
-ax.set_xlabel("Gross Margin (%)")
-ax.set_title("Gross Margin % by Division")
-ax.set_xlim(0, 90)
-plt.tight_layout()
-save_and_show("03_division_margin.png")
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 8 — Product Profitability Leaderboard
-# ╔══════════════════════════════════════════════════════════════════════════════
-
-divider("CHART 4 — Product Gross Profit Leaderboard")
-
-fig, ax = plt.subplots(figsize=(11, 7))
-top  = prod.sort_values("Total_Gross_Profit", ascending=True)
-cols = [PALETTE.get(d, "#999") for d in top["Division"]]
-bars = ax.barh(top["Product Name"], top["Total_Gross_Profit"],
-               color=cols, edgecolor="white", linewidth=0.4)
-
-for b in bars:
-    ax.text(b.get_width() + 50, b.get_y() + b.get_height()/2,
-            f"${b.get_width():,.0f}", va="center", fontsize=8.5)
-
-ax.set_xlabel("Total Gross Profit ($)")
-ax.set_title("Product Gross Profit Leaderboard (All Products)")
-patches = [mpatches.Patch(color=v, label=k) for k, v in PALETTE.items()]
-ax.legend(handles=patches, loc="lower right", fontsize=9)
-plt.tight_layout()
-save_and_show("04_product_leaderboard.png")
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 9 — Product Gross Margin %
-# ╔══════════════════════════════════════════════════════════════════════════════
-
-divider("CHART 5 — Gross Margin % per Product")
-
-pm   = prod.sort_values("Gross Margin %", ascending=True)
-cols = [PALETTE.get(d, "#999") for d in pm["Division"]]
-
-fig, ax = plt.subplots(figsize=(11, 7))
-bars = ax.barh(pm["Product Name"], pm["Gross Margin %"],
-               color=cols, edgecolor="white", linewidth=0.4)
-
-ax.axvline(overall_margin, color=ACCENT, ls="--", lw=1.5)
-ax.text(overall_margin + 0.5, 0.3, f"Avg {overall_margin:.1f}%",
-        color=ACCENT, fontsize=8, va="bottom")
-
-for b in bars:
-    ax.text(b.get_width() + 0.5, b.get_y() + b.get_height()/2,
-            f"{b.get_width():.1f}%", va="center", fontsize=8.5)
-
-ax.set_xlabel("Gross Margin (%)")
-ax.set_title("Gross Margin % by Product  |  dashed line = portfolio average")
-patches = [mpatches.Patch(color=v, label=k) for k, v in PALETTE.items()]
-ax.legend(handles=patches, loc="lower right", fontsize=9)
-plt.tight_layout()
-save_and_show("05_product_margin.png")
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 10 — Sales vs Gross Profit Bubble Chart
-# ╔══════════════════════════════════════════════════════════════════════════════
-
-divider("CHART 6 — Sales vs Gross Profit Bubble Chart")
-
-fig, ax = plt.subplots(figsize=(11, 7))
-
-for div_name, grp in prod.groupby("Division"):
-    ax.scatter(grp["Total_Sales"], grp["Total_Gross_Profit"],
-               s=grp["Total_Units"] / 5, alpha=0.75,
-               color=PALETTE.get(div_name, "#999"),
-               label=div_name, edgecolors="white", linewidth=0.5)
-
-for _, row in prod.iterrows():
-    label = row["Product Name"].replace("Wonka Bar - ", "").replace("Wonka Bar -", "")
-    ax.annotate(label,
-                (row["Total_Sales"], row["Total_Gross_Profit"]),
-                fontsize=8, ha="center", va="bottom",
-                xytext=(0, 5), textcoords="offset points")
-
-ax.set_xlabel("Total Sales ($)")
-ax.set_ylabel("Total Gross Profit ($)")
-ax.set_title("Sales vs Gross Profit  |  Bubble size = Total Units sold")
-ax.xaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"${v:,.0f}"))
-ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"${v:,.0f}"))
-ax.legend(title="Division", fontsize=9)
-plt.tight_layout()
-save_and_show("06_sales_vs_profit_bubble.png")
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 11 — Cost vs Sales (Margin Risk Scatter)
-# ╔══════════════════════════════════════════════════════════════════════════════
-
-divider("CHART 7 — Cost vs Sales  (Margin Risk Diagnostics)")
-
-fig, ax = plt.subplots(figsize=(11, 7))
-
-for div_name, grp in prod.groupby("Division"):
-    ax.scatter(grp["Total_Cost"], grp["Total_Sales"],
-               color=PALETTE.get(div_name, "#999"),
-               label=div_name, s=80,
-               edgecolors="white", linewidth=0.5, alpha=0.9)
-
-max_val = max(prod["Total_Sales"].max(), prod["Total_Cost"].max()) * 1.05
-ax.plot([0, max_val], [0, max_val], "k--", lw=1.2, alpha=0.35, label="Break-even line")
-
-for _, row in prod.iterrows():
-    label = row["Product Name"].replace("Wonka Bar - ", "").replace("Wonka Bar -", "")
-    ax.annotate(label,
-                (row["Total_Cost"], row["Total_Sales"]),
-                fontsize=8, ha="center", va="bottom",
-                xytext=(0, 5), textcoords="offset points")
-
-ax.set_xlabel("Total Cost ($)")
-ax.set_ylabel("Total Sales ($)")
-ax.set_title("Cost vs Sales  |  Points above break-even line = profitable")
-ax.xaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"${v:,.0f}"))
-ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"${v:,.0f}"))
-ax.legend(title="Division", fontsize=9)
-plt.tight_layout()
-save_and_show("07_cost_vs_sales.png")
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 12 — Pareto Analysis (Revenue)
-# ╔══════════════════════════════════════════════════════════════════════════════
-
-divider("CHART 8 — Pareto Analysis: Revenue Concentration")
-
-p_rev = prod.sort_values("Total_Sales", ascending=False).reset_index(drop=True)
-p_rev["Cum Rev %"] = (p_rev["Total_Sales"].cumsum() / p_rev["Total_Sales"].sum() * 100).round(1)
-
-fig, ax1 = plt.subplots(figsize=(13, 6))
-bar_colors = [PALETTE.get(d, "#999") for d in p_rev["Division"]]
-bars = ax1.bar(range(len(p_rev)), p_rev["Total_Sales"],
-               color=bar_colors, edgecolor="white", linewidth=0.4)
-
-ax1.set_xticks(range(len(p_rev)))
-ax1.set_xticklabels(p_rev["Product Name"], rotation=45, ha="right", fontsize=9)
-ax1.set_ylabel("Total Sales ($)")
-ax1.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"${v:,.0f}"))
-
-ax2 = ax1.twinx()
-ax2.plot(range(len(p_rev)), p_rev["Cum Rev %"],
-         color=ACCENT, marker="o", ms=5, lw=2, label="Cumulative %")
-ax2.axhline(80, color="red", ls="--", lw=1.2, alpha=0.7, label="80% threshold")
-ax2.set_ylabel("Cumulative Revenue %", color=ACCENT)
-ax2.set_ylim(0, 115)
-ax2.tick_params(axis="y", colors=ACCENT)
-
-ax1.set_title("Pareto Analysis — Revenue Concentration")
-patches = [mpatches.Patch(color=v, label=k) for k, v in PALETTE.items()]
-ax1.legend(handles=patches, loc="center right", fontsize=9)
-plt.tight_layout()
-save_and_show("08_pareto_revenue.png")
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 13 — Pareto Analysis (Profit)
-# ╔══════════════════════════════════════════════════════════════════════════════
-
-divider("CHART 9 — Pareto Analysis: Profit Concentration")
-
-p_prf = prod.sort_values("Total_Gross_Profit", ascending=False).reset_index(drop=True)
-p_prf["Cum Prf %"] = (p_prf["Total_Gross_Profit"].cumsum() / p_prf["Total_Gross_Profit"].sum() * 100).round(1)
-
-fig, ax1 = plt.subplots(figsize=(13, 6))
-bar_colors = [PALETTE.get(d, "#999") for d in p_prf["Division"]]
-ax1.bar(range(len(p_prf)), p_prf["Total_Gross_Profit"],
-        color=bar_colors, edgecolor="white", linewidth=0.4)
-
-ax1.set_xticks(range(len(p_prf)))
-ax1.set_xticklabels(p_prf["Product Name"], rotation=45, ha="right", fontsize=9)
-ax1.set_ylabel("Total Gross Profit ($)")
-ax1.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"${v:,.0f}"))
-
-ax2 = ax1.twinx()
-ax2.plot(range(len(p_prf)), p_prf["Cum Prf %"],
-         color="#2E8B57", marker="o", ms=5, lw=2, label="Cumulative %")
-ax2.axhline(80, color="red", ls="--", lw=1.2, alpha=0.7, label="80% threshold")
-ax2.set_ylabel("Cumulative Profit %", color="#2E8B57")
-ax2.set_ylim(0, 115)
-ax2.tick_params(axis="y", colors="#2E8B57")
-
-ax1.set_title("Pareto Analysis — Profit Concentration")
-patches = [mpatches.Patch(color=v, label=k) for k, v in PALETTE.items()]
-ax1.legend(handles=patches, loc="center right", fontsize=9)
-plt.tight_layout()
-save_and_show("09_pareto_profit.png")
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 14 — Revenue & Profit Share Pie Charts
-# ╔══════════════════════════════════════════════════════════════════════════════
-
-divider("CHART 10 — Division Share: Revenue & Profit")
-
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 6))
-pie_colors = [PALETTE[d] for d in div["Division"]]
-
-ax1.pie(div["Revenue Contribution"],
-        labels=div["Division"],
-        colors=pie_colors,
-        autopct="%1.1f%%",
-        startangle=140,
-        pctdistance=0.75,
-        wedgeprops={"edgecolor": "white", "linewidth": 2})
-ax1.set_title("Revenue Share by Division")
-
-ax2.pie(div["Profit Contribution"],
-        labels=div["Division"],
-        colors=pie_colors,
-        autopct="%1.1f%%",
-        startangle=140,
-        pctdistance=0.75,
-        wedgeprops={"edgecolor": "white", "linewidth": 2})
-ax2.set_title("Gross Profit Share by Division")
-
-plt.suptitle("Division Contribution — Revenue vs Profit",
-             fontsize=13, fontweight="bold", y=1.02)
-plt.tight_layout()
-save_and_show("10_division_pie_charts.png")
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 15 — Monthly Revenue Trend
-# ╔══════════════════════════════════════════════════════════════════════════════
-
-divider("CHART 11 — Monthly Revenue Trend by Division")
-
-monthly = (df.groupby(["Month", "Division"])["Sales"]
-             .sum()
-             .reset_index())
-monthly["Month_dt"] = monthly["Month"].dt.to_timestamp()
-
-fig, ax = plt.subplots(figsize=(13, 5))
-for div_name, grp in monthly.groupby("Division"):
-    grp = grp.sort_values("Month_dt")
-    ax.plot(grp["Month_dt"], grp["Sales"],
-            marker="o", ms=4,
-            color=PALETTE.get(div_name, "#999"),
-            label=div_name, lw=2)
-
-ax.set_xlabel("Month")
-ax.set_ylabel("Sales ($)")
-ax.set_title("Monthly Revenue Trend by Division")
-ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"${v:,.0f}"))
-ax.legend(title="Division", fontsize=9)
-plt.xticks(rotation=35)
-plt.tight_layout()
-save_and_show("11_monthly_revenue_trend.png")
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 16 — Monthly Gross Margin % Trend
-# ╔══════════════════════════════════════════════════════════════════════════════
-
-divider("CHART 12 — Monthly Gross Margin % Trend by Division")
-
-monthly_m = (df.groupby(["Month", "Division"])
-               .agg(S=("Sales", "sum"), GP=("Gross Profit", "sum"))
-               .reset_index())
-monthly_m["Margin %"] = (monthly_m["GP"] / monthly_m["S"] * 100).round(2)
-monthly_m["Month_dt"] = monthly_m["Month"].dt.to_timestamp()
-
-fig, ax = plt.subplots(figsize=(13, 5))
-for div_name, grp in monthly_m.groupby("Division"):
-    grp = grp.sort_values("Month_dt")
-    ax.plot(grp["Month_dt"], grp["Margin %"],
-            marker="o", ms=4,
-            color=PALETTE.get(div_name, "#999"),
-            label=div_name, lw=2)
-
-ax.axhline(overall_margin, color="#888", ls=":", lw=1.2,
-           label=f"Portfolio avg {overall_margin:.1f}%")
-ax.set_xlabel("Month")
-ax.set_ylabel("Gross Margin (%)")
-ax.set_title("Monthly Gross Margin % Trend by Division")
-ax.legend(title="Division", fontsize=9)
-plt.xticks(rotation=35)
-plt.tight_layout()
-save_and_show("12_monthly_margin_trend.png")
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 17 — Profit per Unit Heatmap
-# ╔══════════════════════════════════════════════════════════════════════════════
-
-divider("CHART 13 — Profit per Unit Heatmap")
-
-ppu_pivot = (df.groupby(["Product Name", "Division"])["Profit per Unit"]
-               .mean()
-               .reset_index()
-               .pivot(index="Product Name", columns="Division", values="Profit per Unit"))
-
-fig, ax = plt.subplots(figsize=(9, 9))
-sns.heatmap(
-    ppu_pivot,
-    annot=True, fmt=".2f",
-    cmap="YlGn",
-    linewidths=0.5,
-    ax=ax,
-    cbar_kws={"label": "Avg Profit / Unit ($)"},
-    annot_kws={"size": 10}
-)
-ax.set_title("Profit per Unit Heatmap  (Product × Division)")
-ax.set_xlabel("Division")
-ax.set_ylabel("Product")
-plt.tight_layout()
-save_and_show("13_profit_per_unit_heatmap.png")
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 18 — Region Revenue & Margin
-# ╔══════════════════════════════════════════════════════════════════════════════
-
-divider("CHART 14 — Revenue & Gross Margin % by Region")
-
-reg = (df.groupby("Region")
-         .agg(Sales=("Sales", "sum"), GP=("Gross Profit", "sum"))
-         .reset_index())
-reg["Margin %"] = (reg["GP"] / reg["Sales"] * 100).round(2)
-
-fig, ax1 = plt.subplots(figsize=(9, 5))
-bars = ax1.bar(reg["Region"], reg["Sales"],
-               color=ACCENT, alpha=0.8, label="Revenue", width=0.5)
-for b in bars:
-    ax1.text(b.get_x() + b.get_width()/2, b.get_height() + 200,
-             f"${b.get_height():,.0f}", ha="center", va="bottom", fontsize=9)
-
-ax2 = ax1.twinx()
-ax2.plot(reg["Region"], reg["Margin %"],
-         color="#E87C6C", marker="D", ms=9, lw=2, label="Margin %")
-for i, (r, m) in enumerate(zip(reg["Region"], reg["Margin %"])):
-    ax2.text(i, m + 0.15, f"{m:.1f}%", ha="center", va="bottom",
-             fontsize=9, color="#E87C6C", fontweight="bold")
-
-ax1.set_ylabel("Total Sales ($)")
-ax2.set_ylabel("Gross Margin (%)", color="#E87C6C")
-ax1.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"${v:,.0f}"))
-ax2.tick_params(axis="y", colors="#E87C6C")
-
-lines1, lbl1 = ax1.get_legend_handles_labels()
-lines2, lbl2 = ax2.get_legend_handles_labels()
-ax1.legend(lines1 + lines2, lbl1 + lbl2, loc="upper right", fontsize=9)
-
-ax1.set_title("Revenue & Gross Margin % by Region")
-plt.tight_layout()
-save_and_show("14_region_revenue_margin.png")
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 19 — Ship Mode Analysis
-# ╔══════════════════════════════════════════════════════════════════════════════
-
-divider("CHART 15 — Ship Mode Analysis")
-
-ship = (df.groupby("Ship Mode")
-          .agg(Orders=("Row ID",       "count"),
-               Sales= ("Sales",        "sum"),
-               GP=    ("Gross Profit", "sum"))
-          .reset_index())
-ship["Margin %"] = (ship["GP"] / ship["Sales"] * 100).round(2)
-
-fig, axes = plt.subplots(1, 3, figsize=(14, 5))
-
-axes[0].bar(ship["Ship Mode"], ship["Orders"],  color=ACCENT,    alpha=0.85)
-axes[0].set_title("Orders by Ship Mode")
-axes[0].set_ylabel("Order Count")
-axes[0].tick_params(axis="x", rotation=20)
-
-axes[1].bar(ship["Ship Mode"], ship["Sales"],   color="#6B3A2A", alpha=0.85)
-axes[1].set_title("Revenue by Ship Mode")
-axes[1].set_ylabel("Sales ($)")
-axes[1].yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"${v:,.0f}"))
-axes[1].tick_params(axis="x", rotation=20)
-
-axes[2].bar(ship["Ship Mode"], ship["Margin %"], color="#2E8B57", alpha=0.85)
-axes[2].set_title("Gross Margin % by Ship Mode")
-axes[2].set_ylabel("Margin %")
-axes[2].tick_params(axis="x", rotation=20)
-
-plt.suptitle("Ship Mode Performance Analysis", fontsize=13, fontweight="bold", y=1.02)
-plt.tight_layout()
-save_and_show("15_ship_mode_analysis.png")
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 20 — Pareto Metrics & Margin Risk Flags
-# ╔══════════════════════════════════════════════════════════════════════════════
-
-divider("STEP 3 — Pareto Metrics & Margin Risk Analysis")
-
-# How many SKUs drive 80% of revenue / profit
-p_rev_s = prod.sort_values("Total_Sales", ascending=False).reset_index(drop=True)
-p_rev_s["Cum Rev %"] = p_rev_s["Total_Sales"].cumsum() / p_rev_s["Total_Sales"].sum() * 100
-n80_rev = int((p_rev_s["Cum Rev %"] < 80).sum()) + 1
-
-p_prf_s = prod.sort_values("Total_Gross_Profit", ascending=False).reset_index(drop=True)
-p_prf_s["Cum Prf %"] = p_prf_s["Total_Gross_Profit"].cumsum() / p_prf_s["Total_Gross_Profit"].sum() * 100
-n80_prf = int((p_prf_s["Cum Prf %"] < 80).sum()) + 1
-
-print(f"  {n80_rev} product(s) account for 80% of total REVENUE")
-print(f"  {n80_prf} product(s) account for 80% of total PROFIT")
-
-# Margin risk: below 90% of portfolio average
-risk_threshold = overall_margin * 0.9
-low_margin = prod[prod["Gross Margin %"] < risk_threshold][
-    ["Product Name", "Division", "Gross Margin %", "Total_Sales", "Total_Gross_Profit"]
-].sort_values("Gross Margin %")
-
-low_margin.to_csv(os.path.join(OUT_DIR, "margin_risk_products.csv"), index=False)
-
-print(f"\n  ⚠  Margin risk threshold: < {risk_threshold:.1f}%  (90% of {overall_margin:.1f}%)")
-print(f"  ⚠  {len(low_margin)} product(s) flagged:\n")
-display(low_margin.style.background_gradient(subset=["Gross Margin %"], cmap="RdYlGn"))
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 21 — Executive Summary (print + save)
-# ╔══════════════════════════════════════════════════════════════════════════════
-
-divider("STEP 4 — Executive Summary")
-
-best_div  = div.loc[div["Gross Margin %"].idxmax(), "Division"]
-worst_div = div.loc[div["Gross Margin %"].idxmin(), "Division"]
-top3_prod = prod.head(3)["Product Name"].tolist()
-bot3_prod = prod.tail(3)["Product Name"].tolist()
-
-summary = f"""
-╔══════════════════════════════════════════════════════════════════╗
-  NASSAU CANDY DISTRIBUTOR — EXECUTIVE SUMMARY
-  Product Line Profitability & Margin Performance Analysis
-╚══════════════════════════════════════════════════════════════════╝
-
-OVERVIEW
-─────────────────────────────────────────────────────────────────
-  Total Revenue          : ${total_sales:>14,.2f}
-  Total Gross Profit     : ${total_gp:>14,.2f}
-  Total Cost             : ${total_cost:>14,.2f}
-  Overall Gross Margin   :  {overall_margin:.1f}%
-  Products Analysed      :  {prod.shape[0]}
-  Orders Analysed        :  {df["Row ID"].nunique():,}
-  Date Range             :  {df["Order Date"].min().date()} → {df["Order Date"].max().date()}
-
-DIVISION PERFORMANCE
-─────────────────────────────────────────────────────────────────
-{div[["Division","Total_Sales","Total_Gross_Profit","Gross Margin %","Revenue Contribution","Profit Contribution"]].to_string(index=False)}
-
-  Best Margin Division   :  {best_div}
-  Weakest Margin Div.    :  {worst_div}
-
-TOP 3 PRODUCTS (by Gross Profit)
-─────────────────────────────────────────────────────────────────
-{prod.head(3)[["Product Name","Division","Total_Sales","Total_Gross_Profit","Gross Margin %"]].to_string(index=False)}
-
-BOTTOM 3 PRODUCTS (by Gross Profit)
-─────────────────────────────────────────────────────────────────
-{prod.tail(3)[["Product Name","Division","Total_Sales","Total_Gross_Profit","Gross Margin %"]].to_string(index=False)}
-
-PARETO CONCENTRATION
-─────────────────────────────────────────────────────────────────
-  {n80_rev} SKU(s) generate 80% of total REVENUE
-  {n80_prf} SKU(s) generate 80% of total PROFIT
-  → High concentration risk: any supply disruption to top SKUs
-    has outsized financial impact.
-
-MARGIN RISK PRODUCTS  (below {risk_threshold:.1f}%)
-─────────────────────────────────────────────────────────────────
-{low_margin.to_string(index=False) if not low_margin.empty else "  None identified."}
-
-STRATEGIC RECOMMENDATIONS
-─────────────────────────────────────────────────────────────────
-  1. PROTECT top performers: {", ".join(top3_prod[:2])}
-     → Increase marketing investment; protect supply chain.
-
-  2. INVESTIGATE {worst_div} division (margin {div.loc[div["Gross Margin %"].idxmin(),"Gross Margin %"]:.1f}%)
-     → Audit cost structure; renegotiate supplier contracts.
-
-  3. RATIONALISE or REPRICE margin-risk products flagged above.
-     → Kazookles (7.7% margin) is a priority discontinuation candidate.
-
-  4. PARETO RISK MITIGATION: Top {n80_prf} SKUs = 80% of profit.
-     → Build buffer inventory; diversify sourcing for key SKUs.
-
-  5. REGIONAL EXPANSION: Gulf and Interior regions show strong
-     margins but lower order volumes — targeted growth opportunity.
-
-  6. SUGAR DIVISION: Excellent margins (66–80%) but negligible
-     revenue ($427 total). Explore scaled distribution or promotion.
-"""
-
-print(summary)
-
-# Save to file
-with open(os.path.join(OUT_DIR, "executive_summary.txt"), "w") as f:
-    f.write(summary)
-print(f"\n💾  Executive summary saved → {OUT_DIR}/executive_summary.txt")
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 22 — Download All Outputs as ZIP
-# ╔══════════════════════════════════════════════════════════════════════════════
-
-divider("STEP 5 — Download All Outputs")
-
-import zipfile
-
-zip_path = "/content/Nassau_Candy_Analysis_Outputs.zip"
-with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-    for fname in os.listdir(OUT_DIR):
-        zf.write(os.path.join(OUT_DIR, fname), fname)
-
-print(f"✅  ZIP created: {zip_path}")
-print(f"📦  Files packaged:")
-for fname in sorted(os.listdir(OUT_DIR)):
-    fsize = os.path.getsize(os.path.join(OUT_DIR, fname))
-    print(f"    {fname:<45}  {fsize/1024:.1f} KB")
-
-# Trigger browser download
-from google.colab import files
-files.download(zip_path)
-print("\n🎉  Download started! Check your browser downloads folder.")
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 23 — (OPTIONAL) Save to Google Drive
-# ╔══════════════════════════════════════════════════════════════════════════════
-#
-# Uncomment and run this cell to save everything to your Google Drive instead.
-#
-# from google.colab import drive
-# drive.mount("/content/drive")
-#
-# import shutil
-# drive_out = "/content/drive/MyDrive/Nassau_Candy_Analysis"
-# os.makedirs(drive_out, exist_ok=True)
-# for fname in os.listdir(OUT_DIR):
-#     shutil.copy(os.path.join(OUT_DIR, fname), os.path.join(drive_out, fname))
-# print(f"✅  All files saved to Google Drive → {drive_out}")
+div["Gross Margin %"] = (div["Total_Gross_Profit"] / div["Total_Sales"] * 100).round(2)
+
+total_sales = df["Sales"].sum()
+total_gp    = df["Gross Profit"].sum()
+overall_margin = total_gp / total_sales * 100 if total_sales else 0
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# HEADER + KPI ROW
+# ══════════════════════════════════════════════════════════════════════════════
+st.title("Product Line Profitability & Margin Performance")
+st.caption("Nassau Candy Distributor — interactive analytics dashboard")
+
+k1, k2, k3, k4, k5 = st.columns(5)
+k1.metric("Total Revenue", f"${total_sales:,.0f}")
+k2.metric("Total Gross Profit", f"${total_gp:,.0f}")
+k3.metric("Overall Margin", f"{overall_margin:.1f}%")
+k4.metric("Orders", f"{df['Row ID'].nunique():,}")
+k5.metric("Products", f"{prod.shape[0]}")
+
+st.markdown("---")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TABS  (mirrors the original dashboard modules)
+# ══════════════════════════════════════════════════════════════════════════════
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📊 Overview",
+    "🏆 Product Profitability",
+    "🏢 Division Performance",
+    "📐 Cost vs Margin Diagnostics",
+    "📈 Profit Concentration (Pareto)",
+])
+
+# ── TAB 1 : OVERVIEW ───────────────────────────────────────────────────────────
+with tab1:
+    c1, c2 = st.columns(2)
+
+    with c1:
+        fig = go.Figure()
+        fig.add_bar(x=div["Division"], y=div["Total_Sales"], name="Revenue",
+                    marker_color=[PALETTE.get(d, "#999") for d in div["Division"]])
+        fig.add_bar(x=div["Division"], y=div["Total_Gross_Profit"], name="Gross Profit",
+                    marker_color=[PALETTE.get(d, "#999") for d in div["Division"]],
+                    opacity=0.5)
+        fig.update_layout(title="Revenue vs Gross Profit by Division",
+                           barmode="group", height=380)
+        st.plotly_chart(fig, use_container_width=True)
+
+    with c2:
+        fig = px.bar(div.sort_values("Gross Margin %"), x="Gross Margin %", y="Division",
+                      orientation="h", color="Division",
+                      color_discrete_map=PALETTE, text="Gross Margin %")
+        fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+        fig.add_vline(x=overall_margin, line_dash="dash", line_color=ACCENT,
+                      annotation_text=f"Avg {overall_margin:.1f}%")
+        fig.update_layout(title="Gross Margin % by Division", height=380, showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+
+    c3, c4 = st.columns(2)
+    with c3:
+        fig = px.pie(div, names="Division", values="Total_Sales",
+                      color="Division", color_discrete_map=PALETTE,
+                      title="Revenue Share by Division", hole=0.4)
+        st.plotly_chart(fig, use_container_width=True)
+    with c4:
+        fig = px.pie(div, names="Division", values="Total_Gross_Profit",
+                      color="Division", color_discrete_map=PALETTE,
+                      title="Profit Share by Division", hole=0.4)
+        st.plotly_chart(fig, use_container_width=True)
+
+    # Monthly trend
+    monthly = df.groupby(["Month", "Division"]).agg(
+        Sales=("Sales", "sum"), GP=("Gross Profit", "sum")
+    ).reset_index()
+    monthly["Margin %"] = (monthly["GP"] / monthly["Sales"] * 100).round(2)
+
+    fig = px.line(monthly, x="Month", y="Sales", color="Division",
+                   color_discrete_map=PALETTE, markers=True,
+                   title="Monthly Revenue Trend by Division")
+    st.plotly_chart(fig, use_container_width=True)
+
+# ── TAB 2 : PRODUCT PROFITABILITY ──────────────────────────────────────────────
+with tab2:
+    sort_option = st.selectbox(
+        "Sort leaderboard by",
+        ["Total_Gross_Profit", "Gross Margin %", "Total_Sales", "Profit per Unit"],
+        index=0,
+    )
+    prod_sorted = prod.sort_values(sort_option, ascending=True)
+
+    fig = px.bar(prod_sorted, x=sort_option, y="Product Name", orientation="h",
+                  color="Division", color_discrete_map=PALETTE,
+                  text=sort_option,
+                  title=f"Product Leaderboard — sorted by {sort_option}")
+    fig.update_traces(texttemplate="%{text:,.1f}", textposition="outside")
+    fig.update_layout(height=max(400, len(prod_sorted) * 35))
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.subheader("Profit & Revenue Contribution")
+    fig = px.scatter(prod, x="Revenue Contribution", y="Profit Contribution",
+                      size="Total_Units", color="Division", color_discrete_map=PALETTE,
+                      hover_name="Product Name",
+                      title="Revenue Contribution vs Profit Contribution (bubble = units sold)")
+    fig.add_shape(type="line", x0=0, y0=0, x1=prod["Revenue Contribution"].max(),
+                  y1=prod["Revenue Contribution"].max(),
+                  line=dict(dash="dash", color="gray"))
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.subheader("Product Detail Table")
+    st.dataframe(
+        prod.style.background_gradient(subset=["Gross Margin %"], cmap="RdYlGn")
+                  .format({
+                      "Total_Sales": "${:,.2f}",
+                      "Total_Cost": "${:,.2f}",
+                      "Total_Gross_Profit": "${:,.2f}",
+                      "Profit per Unit": "${:,.2f}",
+                      "Gross Margin %": "{:.1f}%",
+                      "Revenue Contribution": "{:.1f}%",
+                      "Profit Contribution": "{:.1f}%",
+                  }),
+        use_container_width=True,
+        height=420,
+    )
+
+# ── TAB 3 : DIVISION PERFORMANCE ───────────────────────────────────────────────
+with tab3:
+    fig = go.Figure()
+    fig.add_bar(x=div["Division"], y=div["Total_Cost"], name="Cost",
+                marker_color="lightgray")
+    fig.add_bar(x=div["Division"], y=div["Total_Gross_Profit"], name="Gross Profit",
+                marker_color=[PALETTE.get(d, "#999") for d in div["Division"]])
+    fig.update_layout(barmode="stack", title="Revenue Breakdown — Cost vs Profit", height=420)
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.subheader("Division Summary Table")
+    div_display = div.copy()
+    div_display["Revenue Contribution %"] = (div_display["Total_Sales"] / div_display["Total_Sales"].sum() * 100).round(1)
+    div_display["Profit Contribution %"]  = (div_display["Total_Gross_Profit"] / div_display["Total_Gross_Profit"].sum() * 100).round(1)
+    st.dataframe(
+        div_display.style.format({
+            "Total_Sales": "${:,.2f}", "Total_Cost": "${:,.2f}",
+            "Total_Gross_Profit": "${:,.2f}", "Gross Margin %": "{:.1f}%",
+            "Revenue Contribution %": "{:.1f}%", "Profit Contribution %": "{:.1f}%",
+        }),
+        use_container_width=True,
+    )
+
+# ── TAB 4 : COST VS MARGIN DIAGNOSTICS ─────────────────────────────────────────
+with tab4:
+    c1, c2 = st.columns(2)
+
+    with c1:
+        fig = px.scatter(prod, x="Total_Cost", y="Total_Sales", color="Division",
+                          color_discrete_map=PALETTE, size="Total_Units",
+                          hover_name="Product Name",
+                          title="Cost vs Sales — Margin Risk Diagnostics")
+        max_val = max(prod["Total_Sales"].max(), prod["Total_Cost"].max()) * 1.05
+        fig.add_shape(type="line", x0=0, y0=0, x1=max_val, y1=max_val,
+                      line=dict(dash="dash", color="black"))
+        st.plotly_chart(fig, use_container_width=True)
+
+    with c2:
+        pm = prod.sort_values("Gross Margin %", ascending=True)
+        fig = px.bar(pm, x="Gross Margin %", y="Product Name", orientation="h",
+                      color="Division", color_discrete_map=PALETTE,
+                      title="Gross Margin % by Product")
+        fig.add_vline(x=overall_margin, line_dash="dash", line_color=ACCENT)
+        fig.update_layout(height=420)
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.subheader("⚠️ Margin Risk Flags")
+    risk_threshold = overall_margin * 0.9
+    risk = prod[prod["Gross Margin %"] < risk_threshold][
+        ["Product Name", "Division", "Gross Margin %", "Total_Sales", "Total_Gross_Profit"]
+    ].sort_values("Gross Margin %")
+
+    if risk.empty:
+        st.success("No products currently fall below the margin risk threshold.")
+    else:
+        st.caption(f"Threshold: below {risk_threshold:.1f}% (90% of portfolio average {overall_margin:.1f}%)")
+        st.dataframe(
+            risk.style.background_gradient(subset=["Gross Margin %"], cmap="Reds_r")
+                      .format({"Gross Margin %": "{:.1f}%", "Total_Sales": "${:,.2f}", "Total_Gross_Profit": "${:,.2f}"}),
+            use_container_width=True,
+        )
+
+# ── TAB 5 : PARETO ──────────────────────────────────────────────────────────────
+with tab5:
+    c1, c2 = st.columns(2)
+
+    with c1:
+        p_rev = prod.sort_values("Total_Sales", ascending=False).reset_index(drop=True)
+        p_rev["Cum Rev %"] = (p_rev["Total_Sales"].cumsum() / p_rev["Total_Sales"].sum() * 100).round(1)
+
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        fig.add_bar(x=p_rev["Product Name"], y=p_rev["Total_Sales"], name="Revenue",
+                    marker_color=[PALETTE.get(d, "#999") for d in p_rev["Division"]],
+                    secondary_y=False)
+        fig.add_trace(go.Scatter(x=p_rev["Product Name"], y=p_rev["Cum Rev %"],
+                                  name="Cumulative %", mode="lines+markers",
+                                  line=dict(color=ACCENT)), secondary_y=True)
+        fig.add_hline(y=80, line_dash="dash", line_color="red", secondary_y=True)
+        fig.update_layout(title="Pareto — Revenue Concentration", height=450)
+        st.plotly_chart(fig, use_container_width=True)
+
+        n80_rev = int((p_rev["Cum Rev %"] < 80).sum()) + 1
+        st.info(f"**{n80_rev} product(s)** drive 80% of total revenue.")
+
+    with c2:
+        p_prf = prod.sort_values("Total_Gross_Profit", ascending=False).reset_index(drop=True)
+        p_prf["Cum Prf %"] = (p_prf["Total_Gross_Profit"].cumsum() / p_prf["Total_Gross_Profit"].sum() * 100).round(1)
+
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        fig.add_bar(x=p_prf["Product Name"], y=p_prf["Total_Gross_Profit"], name="Gross Profit",
+                    marker_color=[PALETTE.get(d, "#999") for d in p_prf["Division"]],
+                    secondary_y=False)
+        fig.add_trace(go.Scatter(x=p_prf["Product Name"], y=p_prf["Cum Prf %"],
+                                  name="Cumulative %", mode="lines+markers",
+                                  line=dict(color="#2E8B57")), secondary_y=True)
+        fig.add_hline(y=80, line_dash="dash", line_color="red", secondary_y=True)
+        fig.update_layout(title="Pareto — Profit Concentration", height=450)
+        st.plotly_chart(fig, use_container_width=True)
+
+        n80_prf = int((p_prf["Cum Prf %"] < 80).sum()) + 1
+        st.info(f"**{n80_prf} product(s)** drive 80% of total profit.")
+
+    st.subheader("Concentration Table")
+    conc = p_rev[["Product Name", "Division", "Total_Sales", "Revenue Contribution", "Cum Rev %"]].copy()
+    conc = conc.merge(
+        p_prf[["Product Name", "Total_Gross_Profit", "Profit Contribution", "Cum Prf %"]],
+        on="Product Name"
+    )
+    st.dataframe(
+        conc.style.format({
+            "Total_Sales": "${:,.2f}", "Revenue Contribution": "{:.1f}%", "Cum Rev %": "{:.1f}%",
+            "Total_Gross_Profit": "${:,.2f}", "Profit Contribution": "{:.1f}%", "Cum Prf %": "{:.1f}%",
+        }),
+        use_container_width=True,
+    )
+
+st.markdown("---")
+st.caption("Nassau Candy Distributor · Product Line Profitability & Margin Performance Analysis")
