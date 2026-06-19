@@ -5,3 +5,4 @@ plotly
 matplotlib
 seaborn
 IPython
+google.colab
