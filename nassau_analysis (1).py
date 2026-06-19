@@ -1,22 +1,27 @@
 # =============================================================================
 # Nassau Candy Distributor
 # Product Line Profitability & Margin Performance Analysis
-# Standard Python / Local Notebook Environment
+# Google Colab Notebook
 # =============================================================================
 # HOW TO USE:
-#   1. Place your data file (Nassau_Candy_Distributor.csv) in the same folder as this script.
-#   2. Run the script cells sequentially in a Jupyter Notebook, VS Code, or as a .py file.
+#   1. Open Google Colab: https://colab.research.google.com
+#   2. File → Upload notebook  OR  paste each cell into a new notebook
+#   3. Run Cell 1 first (installs & uploads your CSV)
+#   4. Run remaining cells in order — all charts display inline
 # =============================================================================
 
 
 # ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 1 — Setup: Initialize environment & verify data file
+# CELL 1 — Setup: Install libraries & upload CSV
 # ╔══════════════════════════════════════════════════════════════════════════════
+
+# pip install is only needed for libraries not pre-installed in Colab
+# pandas, numpy, matplotlib, seaborn are already available — no install needed
 
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.patches mpatches
+import matplotlib.patches as mpatches
 import matplotlib.ticker as mticker
 import seaborn as sns
 import warnings
@@ -25,27 +30,20 @@ from IPython.display import display, HTML
 
 warnings.filterwarnings("ignore")
 
-# ── Local File Verification ───────────────────────────────────────────────────
-CSV_FILE = "Nassau_Candy_Distributor.csv"
+# ── Upload your CSV file ──────────────────────────────────────────────────────
+from google.colab import files
 
-if not os.path.exists(CSV_FILE):
-    # Fallback: Check if there's any other CSV file available in the folder
-    csv_files = [f for f in os.listdir('.') if f.endswith('.csv')]
-    if csv_files:
-        CSV_FILE = csv_files[0]
-        print(f"ℹ️  '{CSV_FILE}' not explicitly found. Defaulting to available file: {CSV_FILE}")
-    else:
-        raise FileNotFoundError(
-            "❌ Could not find 'Nassau_Candy_Distributor.csv' or any other CSV file in the current directory.\n"
-            "   Please place your data file in this folder and try again."
-        )
+print("📂  Please upload  Nassau_Candy_Distributor.csv  when prompted ...")
+uploaded = files.upload()
 
-print(f"✅ File verified and ready: {CSV_FILE}")
+# Grab the filename from whatever was uploaded
+CSV_FILE = list(uploaded.keys())[0]
+print(f"\n✅  File received: {CSV_FILE}")
 
-# ── Output folder (Created locally relative to this script) ───────────────────
-OUT_DIR = "./nassau_outputs"
+# ── Output folder (inside Colab's temporary filesystem) ──────────────────────
+OUT_DIR = "/content/nassau_outputs"
 os.makedirs(OUT_DIR, exist_ok=True)
-print(f"📁 Charts and reports will be saved to: {os.path.abspath(OUT_DIR)}")
+print(f"📁  Charts will be saved to: {OUT_DIR}")
 
 
 # ╔══════════════════════════════════════════════════════════════════════════════
@@ -73,10 +71,10 @@ plt.rcParams.update({
 })
 
 def save_and_show(name):
-    """Save chart to output folder AND display inline."""
+    """Save chart to output folder AND display inline in Colab."""
     path = os.path.join(OUT_DIR, name)
     plt.savefig(path, dpi=150, bbox_inches="tight", facecolor=BG)
-    plt.show()          # ← renders inline in Notebooks
+    plt.show()          # ← renders inline in Colab
     plt.close("all")
     print(f"  💾  Saved → {path}\n")
 
@@ -86,7 +84,7 @@ def divider(title):
     print(f"  {title}")
     print("═" * 65)
 
-print("✅ Theme and helpers ready.")
+print("✅  Theme and helpers ready.")
 
 
 # ╔══════════════════════════════════════════════════════════════════════════════
@@ -111,12 +109,12 @@ dropped = before - len(df)
 # ── Derived KPI columns ───────────────────────────────────────────────────────
 df["Gross Margin %"]  = (df["Gross Profit"] / df["Sales"] * 100).round(2)
 df["Profit per Unit"] = (df["Gross Profit"] / df["Units"]).round(2)
-df["Cost per Unit"]   = (df["Cost"]          / df["Units"]).round(2)
-df["Sales per Unit"]  = (df["Sales"]         / df["Units"]).round(2)
+df["Cost per Unit"]   = (df["Cost"]         / df["Units"]).round(2)
+df["Sales per Unit"]  = (df["Sales"]        / df["Units"]).round(2)
 
 # Time features
-df["Year"]        = df["Order Date"].dt.year
-df["Month"]       = df["Order Date"].dt.to_period("M")
+df["Year"]       = df["Order Date"].dt.year
+df["Month"]      = df["Order Date"].dt.to_period("M")
 df["Month_Label"] = df["Order Date"].dt.strftime("%b %Y")
 
 print(f"  Rows loaded        : {len(df):,}  (dropped {dropped} invalid rows)")
@@ -127,7 +125,7 @@ print(f"  Unique customers   : {df['Customer ID'].nunique()}")
 print(f"  Regions            : {sorted(df['Region'].unique())}")
 print(f"\n  Columns available  : {list(df.columns)}")
 
-print("\n📋 Sample rows:")
+print("\n📋  Sample rows:")
 display(df.head(5))
 
 
@@ -170,7 +168,7 @@ div["Profit per Unit"]      = (div["Total_Gross_Profit"] / div["Total_Units"]).r
 div["Revenue Contribution"] = (div["Total_Sales"]        / div["Total_Sales"].sum() * 100).round(2)
 div["Profit Contribution"]  = (div["Total_Gross_Profit"] / div["Total_Gross_Profit"].sum() * 100).round(2)
 
-# Save CSVs locally
+# Save CSVs
 prod.to_csv(os.path.join(OUT_DIR, "product_summary.csv"), index=False)
 div.to_csv(os.path.join(OUT_DIR,  "division_summary.csv"), index=False)
 
@@ -765,29 +763,49 @@ STRATEGIC RECOMMENDATIONS
 
 print(summary)
 
-# Save to file locally
+# Save to file
 with open(os.path.join(OUT_DIR, "executive_summary.txt"), "w") as f:
     f.write(summary)
 print(f"\n💾  Executive summary saved → {OUT_DIR}/executive_summary.txt")
 
 
 # ╔══════════════════════════════════════════════════════════════════════════════
-# CELL 22 — Package All Local Outputs as ZIP
+# CELL 22 — Download All Outputs as ZIP
 # ╔══════════════════════════════════════════════════════════════════════════════
 
-divider("STEP 5 — Package All Local Outputs")
+divider("STEP 5 — Download All Outputs")
 
 import zipfile
 
-zip_path = "./Nassau_Candy_Analysis_Outputs.zip"
+zip_path = "/content/Nassau_Candy_Analysis_Outputs.zip"
 with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
     for fname in os.listdir(OUT_DIR):
         zf.write(os.path.join(OUT_DIR, fname), fname)
 
-print(f"✅ ZIP Archive updated/created: {os.path.abspath(zip_path)}")
-print(f"📦 Files packaged:")
+print(f"✅  ZIP created: {zip_path}")
+print(f"📦  Files packaged:")
 for fname in sorted(os.listdir(OUT_DIR)):
     fsize = os.path.getsize(os.path.join(OUT_DIR, fname))
     print(f"    {fname:<45}  {fsize/1024:.1f} KB")
 
-print("\n🎉 Process complete! Look at your root script directory for the outputs folder and packaged ZIP file.")
+# Trigger browser download
+from google.colab import files
+files.download(zip_path)
+print("\n🎉  Download started! Check your browser downloads folder.")
+
+
+# ╔══════════════════════════════════════════════════════════════════════════════
+# CELL 23 — (OPTIONAL) Save to Google Drive
+# ╔══════════════════════════════════════════════════════════════════════════════
+#
+# Uncomment and run this cell to save everything to your Google Drive instead.
+#
+# from google.colab import drive
+# drive.mount("/content/drive")
+#
+# import shutil
+# drive_out = "/content/drive/MyDrive/Nassau_Candy_Analysis"
+# os.makedirs(drive_out, exist_ok=True)
+# for fname in os.listdir(OUT_DIR):
+#     shutil.copy(os.path.join(OUT_DIR, fname), os.path.join(drive_out, fname))
+# print(f"✅  All files saved to Google Drive → {drive_out}")
